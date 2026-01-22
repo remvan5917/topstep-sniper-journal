@@ -1,213 +1,194 @@
-import React, { useState } from 'react';
-import { Home, BarChart3, TrendingUp } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getFirestore, collection, addDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { Home, TrendingUp, Book } from 'lucide-react';
+
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || 'demo',
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || 'topstep-sniper',
+  appId: process.env.REACT_APP_FIREBASE_APP_ID || 'demo'
+};
+
+let app, auth, db;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.log('Firebase offline mode');
+}
 
 const App = () => {
   const [activeTab, setActiveTab] = useState('home');
-  const [trades, setTrades] = useState([
-    { id: 1, pnl: 150, emotion: 'Confident', date: '2024-01-22' },
-    { id: 2, pnl: -50, emotion: 'Anxious', date: '2024-01-21' },
-  ]);
+  const [trades, setTrades] = useState([]);
   const [capital, setCapital] = useState(50000);
-  const [newTrade, setNewTrade] = useState({ pnl: '', emotion: '' });
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const addTrade = () => {
-    if (newTrade.pnl && newTrade.emotion) {
-      setTrades([...trades, {
-        id: trades.length + 1,
-        pnl: parseFloat(newTrade.pnl),
-        emotion: newTrade.emotion,
-        date: new Date().toISOString().split('T')[0]
-      }]);
-      setCapital(capital + parseFloat(newTrade.pnl));
-      setNewTrade({ pnl: '', emotion: '' });
+  // Auth
+  useEffect(() => {
+    if (auth) {
+      signInAnonymously(auth).then(({ user }) => {
+        setUser(user);
+        setLoading(false);
+        loadData(user.uid);
+      }).catch(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadData = async (userId) => {
+    if (!db) return;
+    try {
+      const q = query(collection(db, 'trades'), where('userId', '==', userId));
+      onSnapshot(q, (snapshot) => {
+        setTrades(snapshot.docs.map(doc => doc.data()));
+      });
+    } catch (e) {
+      console.log('Offline:', e);
     }
   };
 
-  const totalProfit = trades.reduce((sum, trade) => sum + trade.pnl, 0);
-  const winRate = trades.filter(t => t.pnl > 0).length / trades.length * 100;
-  const balance = capital + totalProfit;
+  const addTrade = async (trade) => {
+    const newTrade = { ...trade, userId: user?.uid, timestamp: new Date() };
+    setTrades([...trades, newTrade]);
+    if (db && user) {
+      try {
+        await addDoc(collection(db, 'trades'), newTrade);
+      } catch (e) {
+        console.log('Save offline');
+      }
+    }
+  };
+
+  const stats = {
+    totalTrades: trades.length,
+    winRate: trades.length > 0 ? Math.round((trades.filter(t => t.pnl > 0).length / trades.length) * 100) : 0,
+    totalPnl: trades.reduce((sum, t) => sum + (t.pnl || 0), 0),
+    balance: capital + (trades.reduce((sum, t) => sum + (t.pnl || 0), 0))
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-screen bg-[#0f0f1e] text-white">Loading...</div>;
 
   return (
-    <div style={{
-      backgroundColor: '#0f0f1e',
-      color: '#fff',
-      minHeight: '100vh',
-      fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
-      padding: '20px'
-    }}>
+    <div className="min-h-screen bg-[#0f0f1e] text-white">
       {/* Navigation */}
-      <div style={{
-        display: 'flex',
-        gap: '20px',
-        marginBottom: '30px',
-        borderBottom: '1px solid #333',
-        paddingBottom: '15px'
-      }}>
-        <button
-          onClick={() => setActiveTab('home')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'home' ? '#00d4ff' : '#999',
-            fontSize: '16px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <Home size={20} /> Accueil
-        </button>
-        <button
-          onClick={() => setActiveTab('desk')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'desk' ? '#00d4ff' : '#999',
-            fontSize: '16px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <TrendingUp size={20} /> Trading Desk
-        </button>
-        <button
-          onClick={() => setActiveTab('performance')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'performance' ? '#00d4ff' : '#999',
-            fontSize: '16px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <BarChart3 size={20} /> Performance
-        </button>
-      </div>
-
-      {/* Home Tab */}
-      {activeTab === 'home' && (
-        <div>
-          <h1 style={{ fontSize: '32px', marginBottom: '30px', color: '#00d4ff' }}>Topstep Sniper Journal</h1>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' }}>
-            <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff' }}>
-              <div style={{ color: '#999', fontSize: '14px', marginBottom: '10px' }}>Balance Totale</div>
-              <div style={{ fontSize: '28px', color: '#00d4ff', fontWeight: 'bold' }}>${balance.toFixed(2)}</div>
-            </div>
-            <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff' }}>
-              <div style={{ color: '#999', fontSize: '14px', marginBottom: '10px' }}>Profit Total</div>
-              <div style={{ fontSize: '28px', color: totalProfit > 0 ? '#00ff88' : '#ff0055', fontWeight: 'bold' }}>${totalProfit.toFixed(2)}</div>
-            </div>
-            <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff' }}>
-              <div style={{ color: '#999', fontSize: '14px', marginBottom: '10px' }}>Win Rate</div>
-              <div style={{ fontSize: '28px', color: '#00d4ff', fontWeight: 'bold' }}>{winRate.toFixed(1)}%</div>
-            </div>
-          </div>
-          <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff' }}>
-            <h2 style={{ color: '#00d4ff', marginBottom: '15px' }}>Derniers Trades</h2>
-            {trades.slice(-5).reverse().map(trade => (
-              <div key={trade.id} style={{ padding: '10px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
-                <div>{trade.date} - {trade.emotion}</div>
-                <div style={{ color: trade.pnl > 0 ? '#00ff88' : '#ff0055' }}>${trade.pnl.toFixed(2)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Trading Desk Tab */}
-      {activeTab === 'desk' && (
-        <div style={{ maxWidth: '600px' }}>
-          <h1 style={{ fontSize: '32px', marginBottom: '30px', color: '#00d4ff' }}>Trading Desk</h1>
-          <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff' }}>
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#999' }}>P&L (Profit & Loss)</label>
-              <input
-                type="number"
-                placeholder="Ex: 150 ou -50"
-                value={newTrade.pnl}
-                onChange={(e) => setNewTrade({ ...newTrade, pnl: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  backgroundColor: '#0f0f1e',
-                  border: '1px solid #00d4ff',
-                  color: '#fff',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#999' }}>Émotions</label>
-              <input
-                type="text"
-                placeholder="Ex: Confiant, Peureux, Calme..."
-                value={newTrade.emotion}
-                onChange={(e) => setNewTrade({ ...newTrade, emotion: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  backgroundColor: '#0f0f1e',
-                  border: '1px solid #00d4ff',
-                  color: '#fff',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
+      <nav className="bg-[#1a1a2e] border-b border-[#ffa500] p-4">
+        <div className="max-w-7xl mx-auto flex items-center gap-8">
+          <h1 className="text-2xl font-bold text-[#ffa500]">🎯 Topstep Sniper</h1>
+          <div className="flex gap-4">
             <button
-              onClick={addTrade}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#00d4ff',
-                border: 'none',
-                color: '#0f0f1e',
-                fontSize: '16px',
-                fontWeight: 'bold',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                transition: 'opacity 0.2s'
-              }}
-              onMouseEnter={(e) => e.target.style.opacity = '0.8'}
-              onMouseLeave={(e) => e.target.style.opacity = '1'}
+              onClick={() => setActiveTab('home')}
+              className={`flex items-center gap-2 px-4 py-2 rounded ${activeTab === 'home' ? 'bg-[#ffa500] text-black' : 'text-gray-300'}`}
             >
-              Enregistrer Trade
+              <Home size={18} /> Accueil
+            </button>
+            <button
+              onClick={() => setActiveTab('desk')}
+              className={`flex items-center gap-2 px-4 py-2 rounded ${activeTab === 'desk' ? 'bg-[#ffa500] text-black' : 'text-gray-300'}`}
+            >
+              <TrendingUp size={18} /> Trading Desk
+            </button>
+            <button
+              onClick={() => setActiveTab('journal')}
+              className={`flex items-center gap-2 px-4 py-2 rounded ${activeTab === 'journal' ? 'bg-[#ffa500] text-black' : 'text-gray-300'}`}
+            >
+              <Book size={18} /> Journal
             </button>
           </div>
         </div>
-      )}
+      </nav>
 
-      {/* Performance Tab */}
-      {activeTab === 'performance' && (
-        <div>
-          <h1 style={{ fontSize: '32px', marginBottom: '30px', color: '#00d4ff' }}>Performance</h1>
-          <div style={{ backgroundColor: '#1a1a2e', padding: '20px', borderRadius: '8px', border: '1px solid #00d4ff', marginBottom: '20px' }}>
-            <h2 style={{ color: '#00d4ff', marginBottom: '15px' }}>Tous les Trades ({trades.length})</h2>
-            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {trades.map(trade => (
-                <div key={trade.id} style={{ padding: '15px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ color: '#00d4ff' }}>{trade.date}</div>
-                    <div style={{ color: '#999', fontSize: '12px' }}>{trade.emotion}</div>
+      {/* Content */}
+      <div className="max-w-7xl mx-auto p-6">
+        {activeTab === 'home' && (
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-[#1a1a2e] p-6 rounded border border-[#ffa500]">
+              <p className="text-gray-400">Balance</p>
+              <p className="text-3xl font-bold text-[#ffa500]">${stats.balance.toFixed(2)}</p>
+            </div>
+            <div className="bg-[#1a1a2e] p-6 rounded border border-[#ffa500]">
+              <p className="text-gray-400">P&L Total</p>
+              <p className={`text-3xl font-bold ${stats.totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                ${stats.totalPnl.toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-[#1a1a2e] p-6 rounded border border-[#ffa500]">
+              <p className="text-gray-400">Win Rate</p>
+              <p className="text-3xl font-bold text-[#ffa500]">{stats.winRate}%</p>
+            </div>
+            <div className="bg-[#1a1a2e] p-6 rounded border border-[#ffa500]">
+              <p className="text-gray-400">Trades</p>
+              <p className="text-3xl font-bold text-[#ffa500]">{stats.totalTrades}</p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'desk' && (
+          <TradeDesk onAddTrade={addTrade} />
+        )}
+
+        {activeTab === 'journal' && (
+          <div className="bg-[#1a1a2e] rounded p-6 border border-[#ffa500]">
+            <h2 className="text-2xl font-bold mb-4">Journal de Trading</h2>
+            <div className="space-y-4">
+              {trades.map((trade, idx) => (
+                <div key={idx} className="bg-[#0f0f1e] p-4 rounded border border-gray-700">
+                  <div className="flex justify-between">
+                    <span className="font-bold">{trade.type}</span>
+                    <span className={trade.pnl > 0 ? 'text-green-400' : 'text-red-400'}>
+                      {trade.pnl > 0 ? '+' : ''}{trade.pnl}
+                    </span>
                   </div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: trade.pnl > 0 ? '#00ff88' : '#ff0055' }}>
-                    ${trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}
-                  </div>
+                  {trade.emotion && <p className="text-sm text-gray-400 mt-2">Émotion: {trade.emotion}</p>}
                 </div>
               ))}
             </div>
           </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const TradeDesk = ({ onAddTrade }) => {
+  const [type, setType] = useState('BUY');
+  const [pnl, setPnl] = useState('');
+  const [emotion, setEmotion] = useState('');
+
+  const handleAdd = () => {
+    if (pnl) {
+      onAddTrade({ type, pnl: parseFloat(pnl), emotion });
+      setPnl('');
+      setEmotion('');
+    }
+  };
+
+  return (
+    <div className="bg-[#1a1a2e] rounded p-6 border border-[#ffa500]">
+      <h2 className="text-2xl font-bold mb-6">Trading Desk</h2>
+      <div className="space-y-4 max-w-md">
+        <div>
+          <label className="block text-sm mb-2">Type</label>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="w-full bg-[#0f0f1e] border border-[#ffa500] rounded p-2">
+            <option>BUY</option>
+            <option>SELL</option>
+          </select>
         </div>
-      )}
+        <div>
+          <label className="block text-sm mb-2">P&L</label>
+          <input type="number" value={pnl} onChange={(e) => setPnl(e.target.value)} placeholder="Profit ou perte" className="w-full bg-[#0f0f1e] border border-[#ffa500] rounded p-2" />
+        </div>
+        <div>
+          <label className="block text-sm mb-2">Émotion</label>
+          <input type="text" value={emotion} onChange={(e) => setEmotion(e.target.value)} placeholder="Ex: Calme, FOMO..." className="w-full bg-[#0f0f1e] border border-[#ffa500] rounded p-2" />
+        </div>
+        <button onClick={handleAdd} className="w-full bg-[#ffa500] text-black font-bold py-2 rounded hover:bg-orange-600">
+          Enregistrer Trade
+        </button>
+      </div>
     </div>
   );
 };
